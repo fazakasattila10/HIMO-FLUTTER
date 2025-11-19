@@ -1,0 +1,27 @@
+apply plugin: 'com.android.library'
+
+android {
+    compileSdkVersion 34
+    buildToolsVersion "29.0.2"
+    namespace "org.opencv"
+    defaultConfig {
+        minSdkVersion 21
+        targetSdkVersion 34
+    }
+    buildFeatures {
+        buildConfig = true        // <<< GONDOSKODJUNK RÓLA, HOGY GENERÁLÓDJON
+    }
+    lint {
+        abortOnError false // hogy ne álljon meg a build lint miatt
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+        }
+        debug {
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
+}
