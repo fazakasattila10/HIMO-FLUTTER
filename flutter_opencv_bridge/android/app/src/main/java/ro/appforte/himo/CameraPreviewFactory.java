@@ -1,4 +1,4 @@
-package com.example.flutter_opencv_bridge;
+package ro.appforte.himo;
 
 import android.content.Context;
 

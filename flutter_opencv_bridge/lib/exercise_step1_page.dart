@@ -116,7 +116,7 @@ class _ExerciseStep1PageState extends State<ExerciseStep1Page> {
                               dropdownColor: AppColors.blue_dark,
                               underline: const SizedBox(),
                               style: AppTextStyles.button_text,
-                              items: [5, 10, 15].map((e) {
+                              items: [1, 5, 10, 15].map((e) {
                                 return DropdownMenuItem(
                                   value: e,
                                   child: Text("$e", style: AppTextStyles.button_text,)

@@ -6,6 +6,7 @@ import 'package:flutter_opencv_bridge/app_colors.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_opencv_bridge/app_text_styles.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 const _ev = EventChannel('opencv_event_channel');
 const _mc = MethodChannel('opencv_channel');
@@ -33,11 +34,15 @@ class _ExerciseState extends State<Exercise> {
   Timer? restTimer;
   int restSeconds = 15;
 
+  int repetitionsGoal = 2;
+  int repetitionsMade = 0;
+
   // 🆕 visszaszámlálóhoz
   int startCountdown = 3;
   bool showStartOverlay = true;
   Timer? startTimer;
-
+  int mode = 0;
+  int prevMode = 0;
   @override
   void initState() {
     super.initState();
@@ -63,6 +68,7 @@ class _ExerciseState extends State<Exercise> {
       });
       if (startCountdown <= 0) {
         timer.cancel();
+
         setState(() {
           showStartOverlay = false;
         });
@@ -74,22 +80,74 @@ class _ExerciseState extends State<Exercise> {
   void _initializeLogic() {
     setLandscape();
     _sendCalibratedHueToAndroid();
-
+    _getRepetitionGoalFromPrefs();
+    _beep();
     sub = _ev.receiveBroadcastStream().listen((dynamic e) {
       try {
         final Map<String, dynamic> m = e is Map
             ? Map<String, dynamic>.from(e as Map)
             : Map<String, dynamic>.from(json.decode(e as String));
+        setState(() {
+          mode = m['mode'] as int? ?? 0;
+        });
+        //ide kell, hogy melyik mode jott vissza es talale a currenttaskal
+        if (m['type'] == 'rect' && mode != prevMode) {
+          if (prevMode == 0) {
+            if (mode ==3 && currentTask == 1) {
+              if (rectCount > -1) {
+                setState(() {
+                  rectCount++;
+                  prevMode = mode;
+                });
+                final now = DateTime.now().millisecondsSinceEpoch;
+                lastSentMs = now;
+                // _checkTaskProgress();
+              }
+            } else if (mode ==2 && currentTask == 3) {
+              if (rectCount > -1) {
+                final now = DateTime.now().millisecondsSinceEpoch;
+                if (now - lastSentMs >= 300 && rectCount > -1) {
+                  setState(() {
+                    rectCount++;
+                    prevMode = mode;
+                  });
 
-        if (m['type'] == 'rect' && !_isRestTask(currentTask) && currentTask <= 5) {
-          final now = DateTime.now().millisecondsSinceEpoch;
-          if (now - lastSentMs >= 2000 && rectCount > -1) {
-            setState(() => rectCount++);
-            lastSentMs = now;
+                }
+                // final now = DateTime.now().millisecondsSinceEpoch;
+                // lastSentMs = now;
+                // _checkTaskProgress();
+              }
+            } else if (mode ==3 && currentTask == 5) {
+              if (rectCount > -1) {
+                final now = DateTime.now().millisecondsSinceEpoch;
+                if (now - lastSentMs >= 1000 && rectCount > -1) {
+                  setState(() {
+                    rectCount++;
+                    prevMode = mode;
+                    lastSentMs = now;
+                  });
 
-            _checkTaskProgress();
+
+                  _checkTaskProgress();
+                }
+                // _checkTaskProgress();
+              }
+            }
+          } else {
+            if (mode ==0) {
+              if (rectCount > -1) {
+                setState(() {
+                  prevMode = mode;
+                });
+                final now = DateTime.now().millisecondsSinceEpoch;
+                lastSentMs = now;
+                _checkTaskProgress();
+              }
+            }
           }
+
         }
+
       } catch (e) {
         print("EVENT ERROR: $e");
       }
@@ -110,7 +168,20 @@ class _ExerciseState extends State<Exercise> {
     }
   }
 
+  Future<void> _getRepetitionGoalFromPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final repetitions = prefs.getInt('selectedRepetitions');
+    if (repetitions != null) {
+      setState(() {
+        repetitionsGoal = repetitions;
+      });
+    }
+  }
+
   void _checkTaskProgress() {
+    if ((currentTask == 1 ||currentTask==3) && rectCount >= 5) {
+      _beep();
+    }
     if (currentTask == 1 && rectCount >= 5) {
       Future.delayed(const Duration(seconds: 1), () => _startRest(2));
     } else if (currentTask == 3 && rectCount >= 5) {
@@ -141,13 +212,40 @@ class _ExerciseState extends State<Exercise> {
 
       if (restSeconds <= 0) {
         timer.cancel();
+        _beep();
+
         if (currentTask == 5) {
           setState(() {
+            repetitionsMade++;
             icon = "foot_up.svg";
             icon2 = "arrow_up.svg";
-            rectCount = -1; // kész
-            showStartOverlay = true; // kész
           });
+          if (repetitionsMade >= repetitionsGoal) {
+            setState(() {
+              rectCount = -1; // kész
+              showStartOverlay = true; // kész
+            });
+          } else {
+            setState(() {
+              showStartOverlay = true; // kész
+              startCountdown = 3;
+            });
+            startTimer?.cancel();
+            startTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+              setState(() {
+                startCountdown--;
+              });
+              if (startCountdown <= 0) {
+                _beep();
+                timer.cancel();
+                setState(() {
+                  showStartOverlay = false;
+                  rectCount = 0;
+                  currentTask = 1;
+                });
+              }
+            });
+          }
         } else {
           Future.delayed(const Duration(seconds: 1), _moveToNextExercise);
         }
@@ -330,7 +428,8 @@ class _ExerciseState extends State<Exercise> {
                                   borderRadius: BorderRadius.circular(16),
                                 ),
                               ),
-                              child: const Text(
+                              child:  Text(
+
                                 "Exit",
                                 style: AppTextStyles.button_text,
                               ),
@@ -352,6 +451,7 @@ class _ExerciseState extends State<Exercise> {
                             Text(
                               "Nice work!",
                               style: const TextStyle(
+                                decoration: TextDecoration.none,
                                 fontFamily: 'EncodeSans',
                                 fontSize: 40,
                                 fontWeight: FontWeight.w400,
@@ -360,6 +460,7 @@ class _ExerciseState extends State<Exercise> {
                             ),
                             Text("You can close this screen now",
                               style: const TextStyle(
+                                decoration: TextDecoration.none,
                                 fontSize: 25,
                                 fontFamily: 'EncodeSans',
                                 color: Colors.white,
@@ -370,6 +471,7 @@ class _ExerciseState extends State<Exercise> {
                         ):Text(
                           startCountdown.toString(),
                           style: const TextStyle(
+                            decoration: TextDecoration.none,
                             fontSize: 150,
                             fontFamily: 'EncodeSans',
                             color: Colors.white,
@@ -385,5 +487,14 @@ class _ExerciseState extends State<Exercise> {
         ),
       ),
     );
+  }
+  final player = AudioPlayer();
+
+  Future<void> _beep() async {
+    try {
+      await player.play(AssetSource('beep1.mp3'));
+    } catch (e) {
+      print("Beep error: $e");
+    }
   }
 }

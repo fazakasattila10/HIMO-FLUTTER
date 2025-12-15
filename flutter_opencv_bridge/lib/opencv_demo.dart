@@ -114,7 +114,14 @@ class _OpenCVDemoState extends State<OpenCVDemo> {
               onPressed: () => _mc.invokeMethod('stopCamera'),
               child: const Text('Stop camera'),
             ),
-            const Expanded(child: SizedBox.shrink()), // preview marad natív overlay
+            Expanded(
+              child: Container(
+                color: Colors.black,
+                child: const AndroidView(
+                  viewType: 'camera_preview',
+                ),
+              ),
+            ) // preview marad natív overlay
           ],
         ),
       ),

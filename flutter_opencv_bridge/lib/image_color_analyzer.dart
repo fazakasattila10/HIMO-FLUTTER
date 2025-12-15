@@ -71,23 +71,35 @@ class ImageColorAnalyzer {
       dominantBins.add(sorted.first.key * 15);
     }
 
-    final dominantHues = dominantBins;
-    print('🎨 Domináns (különböző) hue-k: $dominantHues');
+    print('🎨 Domináns (különböző) hue-k (jelöltek): $dominantBins');
 
-    // -------- 3️⃣ Mindkettő feldolgozása --------
-    List<img.Image> processedImages = [];
-    for (final hue in dominantHues) {
+    // -------- 3️⃣ Mindkettő feldolgozása, de csak ha értelmes bbox van --------
+    final List<img.Image> processedImages = [];
+    final List<int> acceptedHues = [];
+
+    for (final hue in dominantBins) {
       final processed = _processSingleHue(image, hue);
-      processedImages.add(processed);
+      if (processed != null) {
+        processedImages.add(processed);
+        acceptedHues.add(hue);
+      } else {
+        print('🚫 Hue=$hue → eldobva (túl nagy / túl kicsi / nincs értelmes régió)');
+      }
     }
 
-    return ImageColorAnalysisResult(processedImages, dominantHues);
+    print('✅ Elfogadott hue-k: $acceptedHues');
+
+    return ImageColorAnalysisResult(processedImages, acceptedHues);
   }
 
   // -------- Feldolgozás egy adott hue-ra --------
-  static img.Image _processSingleHue(img.Image image, int dominantHue) {
+  // Ha nincs értelmes bbox (pl. gyakorlatilag az egész kép vagy alig pár pixel),
+  // akkor null-t adunk vissza, így ez a találat nem kerül bele az eredménybe.
+  static img.Image? _processSingleHue(img.Image image, int dominantHue) {
     final width = image.width;
     final height = image.height;
+    final frameArea = (width * height).toDouble();
+
     final hueLow = (dominantHue - 15).clamp(0, 360);
     final hueHigh = (dominantHue + 15).clamp(0, 360);
 
@@ -127,7 +139,7 @@ class ImageColorAnalyzer {
     }
 
     // -------- Zajszűrés --------
-    int window = 2;
+    const int window = 2;
     List<List<int>> cleaned =
     List.generate(height, (_) => List.filled(width, 0));
     for (int y = window; y < height - window; y++) {
@@ -157,22 +169,51 @@ class ImageColorAnalyzer {
       }
     }
 
-    print('📦 Hue=$dominantHue → box: ($minX,$minY)-($maxX,$maxY), pixels=$count');
-
-    final processed = img.copyResize(image, width: width, height: height);
-    if (count > width * height * 0.005 &&
-        minX < maxX &&
-        minY < maxY) {
-      img.drawRect(
-        processed,
-        x1: minX,
-        y1: minY,
-        x2: maxX,
-        y2: maxY,
-        color: img.ColorRgb8(0, 255, 0),
-        thickness: 4,
-      );
+    if (count == 0 || minX >= maxX || minY >= maxY) {
+      print('📦 Hue=$dominantHue → nincs érdemi pixeltalálat');
+      return null;
     }
+
+    final bboxWidth = maxX - minX + 1;
+    final bboxHeight = maxY - minY + 1;
+    final bboxArea = (bboxWidth * bboxHeight).toDouble();
+    final areaRatio = bboxArea / frameArea;          // bbox a teljes képhez képest
+    final fillRatio = bboxArea == 0 ? 0.0 : count / bboxArea; // maszk kitöltöttség a bboxon belül
+
+    print(
+      '📦 Hue=$dominantHue → box: ($minX,$minY)-($maxX,$maxY), '
+          'pixels=$count, areaRatio=${areaRatio.toStringAsFixed(3)}, '
+          'fillRatio=${fillRatio.toStringAsFixed(3)}',
+    );
+
+    // -------- Szűrés: túl nagy / túl kicsi / túl üres bbox eldobása --------
+    const double minAreaRatio = 0.01;  // < 1% → túl kicsi, zaj
+    const double maxAreaRatio = 0.80;  // > 80% → kvázi teljes kép
+    const double minFillRatio = 0.20;  // ha bboxban alig van maszk, ne fogadjuk el
+
+    if (areaRatio < minAreaRatio ||
+        areaRatio > maxAreaRatio ||
+        fillRatio < minFillRatio) {
+      print(
+        '🚫 Hue=$dominantHue → bbox elutasítva '
+            '(areaRatio=${areaRatio.toStringAsFixed(3)}, '
+            'fillRatio=${fillRatio.toStringAsFixed(3)})',
+      );
+      return null;
+    }
+
+    // -------- Rajzolás csak akkor, ha a bbox érvényes --------
+    final processed = img.copyResize(image, width: width, height: height);
+
+    img.drawRect(
+      processed,
+      x1: minX,
+      y1: minY,
+      x2: maxX,
+      y2: maxY,
+      color: img.ColorRgb8(0, 255, 0),
+      thickness: 4,
+    );
 
     // -------- Színkocka --------
     final hsv = HSVtoRGB(dominantHue.toDouble(), 1.0, 1.0);

@@ -1,4 +1,4 @@
-package com.example.flutter_opencv_bridge;
+package ro.appforte.himo;
 import android.content.pm.ActivityInfo;
 import io.flutter.embedding.android.FlutterActivity;
 import io.flutter.plugin.common.EventChannel;

@@ -1,4 +1,4 @@
-package com.example.flutter_opencv_bridge;
+package ro.appforte.himo;
 
 import android.app.Activity;
 import android.util.Log;
@@ -33,6 +33,9 @@ public class StandaloneHelper implements CameraBridgeViewBase.CvCameraViewListen
     private static volatile int satMin = 120;
     private static volatile int valMin = 30;
     private static volatile double areaMin = 15000.0;
+    private static volatile boolean areaCalibrated = false;
+    private static volatile int baseW = 0;
+    private static volatile int baseH = 0;
 
     // Mats / runtime
     private Mat hsv, mask, mask2, morphed, hierarchy, kernel;
@@ -123,7 +126,7 @@ public class StandaloneHelper implements CameraBridgeViewBase.CvCameraViewListen
         t0 = System.currentTimeMillis();
         fpsCnt = 0;
         lastFps = 0;
-        sendStatus("started", 0, 0, 0, 0, 0.0);
+        sendStatus("started", 0, 0, 0, 0, 0.0,0);
     }
 
     @Override
@@ -189,7 +192,7 @@ public class StandaloneHelper implements CameraBridgeViewBase.CvCameraViewListen
                 Log.d(TAG, "mask wrap-around");
             } else {
                 Core.inRange(hsv, new Scalar(loH, satMin, valMin), new Scalar(hiH, 255, 255), mask);
-                Log.d(TAG, "mask simple");
+                Log.d(TAG, "mask ssssimple");
             }
 
             // 3) Morfológia
@@ -205,7 +208,10 @@ public class StandaloneHelper implements CameraBridgeViewBase.CvCameraViewListen
             Rect bestRect = null;
             for (int i = 0; i < contours.size(); i++) {
                 double a = Imgproc.contourArea(contours.get(i));
-                if (a > areaMin && a > bestArea) {
+                //hogy a fix elso kepnel kicsivel kisebbeket
+                // is fogadja el, vagyis azokat, ahol ossze huzza a labat
+                // 5 szazalekkal kisebbel hasonlitjuk
+                if (a > (areaMin*0.90) && a > bestArea) {
                     Rect r = Imgproc.boundingRect(contours.get(i));
                     bestArea = a;
                     bestRect = r;
@@ -213,16 +219,64 @@ public class StandaloneHelper implements CameraBridgeViewBase.CvCameraViewListen
             }
             Log.d(TAG, "rrrrrrrrrrronCameraFrame2");
             if (bestRect != null) {
+
+                // 🆕 csak egyszer kalibrálunk: az első találatkor
+                if (!areaCalibrated) {
+                    areaMin = bestArea;
+                    baseW = bestRect.width;
+                    baseH = bestRect.height;
+                    areaCalibrated = true;
+                    Log.d(TAG, "auto-calibrated areaMin = " + areaMin);
+                }
+
                 Log.d(TAG, "rrrrrrrrrrronCameraFrame3");
                 rect = bestRect;
-                // Rajzolás KÖZVETLENÜL az rgba képre → látható lesz
+                String eventType = "rect";
+                int mode = 0;
+
+                if (baseW > 0 && baseH > 0) {
+                    double wRatio = (double) rect.width  / (double) baseW;
+                    double hRatio = (double) rect.height / (double) baseH;
+
+                    // toleranciák:
+                    final double WIDTH_CHANGE = 0.04;   // 5%
+                    final double HEIGHT_CHANGE = 0.10;  // 5%
+                    // "minimális változás" = abs(ratio - 1.0) <= 5%
+
+                    boolean heightAlmostSame = Math.abs(hRatio - 1.0) <= HEIGHT_CHANGE;
+                    boolean widthAlmostSame  = Math.abs(wRatio - 1.0) <= WIDTH_CHANGE;
+
+                    // 1) szélesség nő ~5%, magasság kb. ugyanaz
+//                    if (wRatio >= 1.0 + WIDTH_CHANGE && heightAlmostSame) {
+//                        eventType = "rect";
+//                        mode = 1;
+//                    }
+                    // 2) szélesség csökken ~5%, magasság kb. ugyanaz
+                    /*else*/
+                    // 3) szélesség kb. ugyanaz, magasság nő 5-10%
+                    if (/*widthAlmostSame &&*/ hRatio >= 1.17) { // ide tehetsz felső limitet is, pl. && hRatio <= 1.10
+                        eventType = "rect";
+                        mode = 3;
+                    } else if (wRatio <= 1.0 - WIDTH_CHANGE /*&& heightAlmostSame*/) {
+                        eventType = "rect";
+                        mode = 2;
+                    } else {
+                        // semmi különleges, "sima" rect → mode=0
+                        eventType = "rect";
+                        mode = 0;
+                    }
+
+                    Log.d(TAG, String.format("shape ratios: wRatio=%.3f hRatio=%.3f mode=%d", wRatio, hRatio, mode));
+                }
+
+                // Rajzolás mindig ugyanaz
                 Imgproc.rectangle(rgba, rect.tl(), rect.br(), new Scalar(0, 255, 0, 255), 4);
-                sendStatusThrottled("rect", rect.x, rect.y, rect.width, rect.height, bestArea, 100);
-                Log.d(TAG, "rrrrrrrrrrronCameraFrame4");
-                Log.d(TAG, "rect found area=" + bestArea);
-            } else {
+
+                // és most már a mode-ot is elküldjük
+                sendStatusThrottled(eventType, rect.x, rect.y, rect.width, rect.height, bestArea, mode, 100);
+            }  else {
                 Log.d(TAG, "rrrrrrrrrrronCameraFrame5");
-                sendStatusThrottled("none", 0, 0, 0, 0, 0.0, 250);
+                sendStatusThrottled("none", 0, 0, 0, 0, 0.0, 0,250);
                 Log.d(TAG, "rrrrrrrrrrrrno rect found");
             }
 
@@ -234,7 +288,7 @@ public class StandaloneHelper implements CameraBridgeViewBase.CvCameraViewListen
                 fpsCnt = 0;
                 t0 = now;
                 Log.d(TAG, "rrrrrrrrrrronCameraFrame6");
-                sendStatus("tick", rect.x, rect.y, rect.width, rect.height, bestArea);
+                sendStatus("tick", rect.x, rect.y, rect.width, rect.height, bestArea,  0);
                 Log.d(TAG, "fps=" + lastFps);
             }
 
@@ -378,12 +432,12 @@ public class StandaloneHelper implements CameraBridgeViewBase.CvCameraViewListen
 //            Log.w(TAG, "event error", t);
 //        }
 //    }
-    private void sendStatus(String type, int x, int y, int w, int h, double area) {
+    private void sendStatus(String type, int x, int y, int w, int h, double area, int mode) {
         if (eventSink == null) return;
 
         String json = String.format(
-                "{\"type\":\"%s\",\"hue\":%d,\"w\":%d,\"h\":%d,\"x\":%d,\"y\":%d,\"area\":%.1f,\"fps\":%d}",
-                type, targetHue, w, h, x, y, area, lastFps
+                "{\"type\":\"%s\",\"mode\":%d,\"hue\":%d,\"w\":%d,\"h\":%d,\"x\":%d,\"y\":%d,\"area\":%.1f,\"fps\":%d}",
+                type, mode, targetHue, w, h, x, y, area, lastFps
         );
 
         // Fő szálra postolás
@@ -397,10 +451,11 @@ public class StandaloneHelper implements CameraBridgeViewBase.CvCameraViewListen
             }
         });
     }
-    private void sendStatusThrottled(String type, int x, int y, int w, int h, double area, long minIntervalMs) {
+    private void sendStatusThrottled(String type, int x, int y, int w, int h,
+                                     double area, int mode, long minIntervalMs) {
         long now = System.currentTimeMillis();
         if (now - lastEventMs < minIntervalMs) return;
         lastEventMs = now;
-        sendStatus(type, x, y, w, h, area);
+        sendStatus(type, x, y, w, h, area, mode);
     }
 }

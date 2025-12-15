@@ -1,13 +1,15 @@
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+import java.util.Properties
 
 android {
-    namespace = "com.example.flutter_opencv_bridge"
-    compileSdk = flutter.compileSdkVersion
+    namespace = "ro.appforte.himo"
+    compileSdk = 36
     ndkVersion = "27.0.12077973"
 
     compileOptions {
@@ -21,20 +23,32 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.flutter_opencv_bridge"
+        applicationId = "ro.appforte.himo"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        minSdk = 23
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
-
+    signingConfigs {
+        create("release") {
+            val keystoreProperties = Properties()
+            val keystoreFile = rootProject.file("key.properties")
+            if (keystoreFile.exists()) {
+                keystoreFile.inputStream().use { keystoreProperties.load(it) }
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+            }
+        }
+    }
     buildTypes {
 
-        release {
-            isMinifyEnabled = false
-            isShrinkResources = false  // <-- ez kell a hibához
+        getByName("release") {
+            isMinifyEnabled = true        // vagy false, ha nem akarsz R8-at
+            signingConfig = signingConfigs.getByName("release")
         }
         debug {
             isMinifyEnabled = false
